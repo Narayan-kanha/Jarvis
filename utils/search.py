@@ -1,131 +1,198 @@
 # utils/search.py
+"""
+Search helpers for Jarvis.
+
+Primary flow:
+  1) DuckDuckGo (duckduckgo_search ddg) -> returns title, snippet, href
+  2) Wikipedia summary fallback (if installed)
+  3) Final fallback: "Sorry, I couldn't find anything"
+
+Exposes:
+  - google_search_summary(query) -> (summary_text, filename_or_None)
+  - search_top_result(query) -> dict(title, href, snippet) or None
+  - download_via_search(query_or_url, gui_cb=None, gui_confirm=None)
+"""
+
+import os
 import time
-import requests, webbrowser, os
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, quote_plus
+import webbrowser
+from urllib.parse import urlparse, urljoin, quote_plus
+
+SUMMARY_DIR = "./search_summaries"
+os.makedirs(SUMMARY_DIR, exist_ok=True)
+
+# Try duckduckgo-search (fast and no key required)
 try:
     from duckduckgo_search import ddg
     DDG_AVAILABLE = True
 except Exception:
+    ddg = None
     DDG_AVAILABLE = False
 
-SUMMARY_DIR = "./search_summaries"; os.makedirs(SUMMARY_DIR, exist_ok=True)
+# Optional wikipedia fallback
+try:
+    import wikipedia
+    WIKI_AVAILABLE = True
+except Exception:
+    wikipedia = None
+    WIKI_AVAILABLE = False
 
-def google_search_top_url(query: str):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        url = f"https://www.google.com/search?q={quote_plus(query)}"
-        r = requests.get(url, headers=headers, timeout=10)
-        text = r.text
-        if "unusual traffic" in text.lower():
-            return None, "google-block"
-        soup = BeautifulSoup(text, "html.parser")
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.startswith("/url?q="):
-                u = href.split("/url?q=")[1].split("&")[0]
-                if u and "google" not in u:
-                    return u, None
-        return None, "no-link"
-    except Exception as e:
-        return None, str(e)
+# standard requests for direct fetching if needed
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:
+    requests = None
+    REQUESTS_AVAILABLE = False
 
-def google_fetch_summary_from_url(url: str):
-    headers = {"User-Agent": "Mozilla/5.0"}
+def _save_summary_file(query: str, title: str, url: str, summary: str) -> str:
+    """Save a short summary file and return its path."""
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    safe_title = (title or "result").replace("/", "_").replace("\\", "_")[:60]
+    fname = os.path.join(SUMMARY_DIR, f"summary_{safe_title}_{ts}.txt")
     try:
-        r = requests.get(url, headers=headers, timeout=8)
-        soup = BeautifulSoup(r.text, "html.parser")
-        meta = soup.find("meta", attrs={"name":"description"}) or soup.find("meta", attrs={"property":"og:description"})
-        if meta and meta.get("content"):
-            return meta.get("content").strip()[:800]
-        for p in soup.find_all("p"):
-            t = p.get_text(strip=True)
-            if len(t) > 50:
-                return t[:800]
-        return soup.get_text(separator=" ", strip=True)[:800]
-    except Exception:
-        return ""
-
-def duckduckgo_search_summary(query: str):
-    if not DDG_AVAILABLE:
-        return ("DuckDuckGo not available", None)
-    try:
-        results = ddg(query, max_results=3)
-        if not results:
-            return ("No DDG results", None)
-        first = results[0]
-        title = first.get("title","")
-        body = first.get("body","")
-        href = first.get("href","")
-        summary = f"{title} - {body}"
-        fname = os.path.join(SUMMARY_DIR, f"ddg_{int(time.time())}.txt")
         with open(fname, "w", encoding="utf-8") as f:
-            f.write(f"Query:{query}\nURL:{href}\n\n{summary}")
-        return (summary, fname)
-    except Exception as e:
-        return (f"DDG error: {e}", None)
+            f.write(f"Query: {query}\nURL: {url}\n\n{summary}\n")
+        return fname
+    except Exception:
+        return None
+
+def search_top_result(query: str):
+    """
+    Return a top result dict from DuckDuckGo if available:
+      {"title": ..., "href": ..., "snippet": ...}
+    Returns None if no usable result.
+    """
+    if not query:
+        return None
+
+    # Prefer DuckDuckGo results
+    if DDG_AVAILABLE:
+        try:
+            results = ddg(query, max_results=4)
+            if results:
+                first = results[0]
+                return {
+                    "title": first.get("title", "").strip(),
+                    "href": first.get("href", first.get("url", "")).strip(),
+                    "snippet": first.get("body", "").strip() or first.get("snippet", "").strip()
+                }
+            return None
+        except Exception as exc:
+            # graceful fallback
+            print("[search] DuckDuckGo search failed:", exc)
+
+    # If ddg not available, try wiki quick lookup (best-effort)
+    if WIKI_AVAILABLE:
+        try:
+            page = wikipedia.search(query, results=1)
+            if page:
+                title = page[0]
+                url = f"https://en.wikipedia.org/wiki/{quote_plus(title)}"
+                snippet = wikipedia.summary(title, sentences=2)
+                return {"title": title, "href": url, "snippet": snippet}
+        except Exception:
+            pass
+
+    # As final fallback, try a basic Google-like fetch (very unreliable due to blocks)
+    # We'll skip scraping here — return None to indicate no top result.
+    return None
 
 def google_search_summary(query: str):
-    top, err = google_search_top_url(query)
-    if err:
-        if DDG_AVAILABLE:
-            return duckduckgo_search_summary(query)
-        return (f"Google failed: {err}", None)
-    if not top:
-        if DDG_AVAILABLE:
-            return duckduckgo_search_summary(query)
-        return ("No result", None)
-    summ = google_fetch_summary_from_url(top)
-    if not summ:
-        fname = os.path.join(SUMMARY_DIR, f"open_{int(time.time())}.txt")
-        with open(fname, "w", encoding="utf-8") as f:
-            f.write(f"Query:{query}\nTop:{top}\n")
-        try:
-            webbrowser.open(top)
-        except:
-            pass
-        return (f"I opened the top result: {top}", fname)
-    fname = os.path.join(SUMMARY_DIR, f"summary_{int(time.time())}.txt")
-    with open(fname, "w", encoding="utf-8") as f:
-        f.write(f"Query:{query}\nURL:{top}\n\n{summ}")
-    return (summ, fname)
+    """
+    Primary method used by older code. Returns (summary_text, filename_or_None).
+    Order:
+      1) DuckDuckGo -> take title + snippet
+      2) Wikipedia -> summary
+      3) Final fallback message
+    """
+    if not query:
+        return ("Empty query", None)
 
-# simple download helper using requests streaming (used earlier in GUI)
+    # 1) Try DuckDuckGo summary
+    if DDG_AVAILABLE:
+        try:
+            results = ddg(query, max_results=3)
+            if results:
+                first = results[0]
+                title = first.get("title", "").strip()
+                body = first.get("body", "") or first.get("snippet", "") or ""
+                href = first.get("href", first.get("url", "")).strip()
+                summary = f"{title}\n\n{body}".strip()
+                fname = _save_summary_file(query, title, href, summary)
+                return (summary or f"{title} — {href}", fname)
+        except Exception as exc:
+            print("[search] DuckDuckGo error:", exc)
+
+    # 2) Wikipedia fallback
+    if WIKI_AVAILABLE:
+        try:
+            # wikipedia.summary can raise exceptions for ambiguous pages; catch them
+            summ = wikipedia.summary(query, sentences=2)
+            if summ:
+                fname = _save_summary_file(query, query, f"https://en.wikipedia.org/wiki/{quote_plus(query)}", summ)
+                return (summ, fname)
+        except Exception as exc:
+            print("[search] Wikipedia fallback failed:", exc)
+
+    # 3) No results
+    return ("Sorry — I couldn't find anything useful for that query.", None)
+
+
+# The existing download helpers (kept for compatibility)
 def download_file_with_progress(url: str, dest: str, gui_cb=None):
+    """Simple streaming download with a gui callback signature (progress, progress_text)."""
     try:
-        headers = {"User-Agent":"Mozilla/5.0"}
+        if not REQUESTS_AVAILABLE:
+            raise RuntimeError("requests not available")
+        headers = {"User-Agent": "Mozilla/5.0"}
         with requests.get(url, stream=True, headers=headers, timeout=30) as r:
             r.raise_for_status()
-            total = int(r.headers.get("content-length", 0))
+            total = int(r.headers.get("content-length", 0) or 0)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             written = 0
+            chunk = 8192
             with open(dest, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        written += len(chunk)
-                        if gui_cb and total:
-                            gui_cb(progress=written/total, progress_text=f"{int((written/total)*100)}%")
+                for piece in r.iter_content(chunk_size=chunk):
+                    if piece:
+                        f.write(piece)
+                        written += len(piece)
+                        if gui_cb:
+                            if total:
+                                gui_cb(progress=written / total, progress_text=f"{int((written/total)*100)}%")
+                            else:
+                                gui_cb(progress=None, progress_text=f"{written//1024} KB")
+        if gui_cb:
+            gui_cb(assistant_text=f"Downloaded to {dest}", status="Idle")
         return True
-    except Exception:
+    except Exception as exc:
+        print("[download] error:", exc)
+        if gui_cb:
+            gui_cb(assistant_text="Download failed", status="Idle")
         return False
 
 def download_via_search(query_or_url: str, gui_cb=None, gui_confirm=None):
-    # If looks like url, download directly
+    """
+    Find and download a file. If a direct URL passed, downloads directly.
+    If a query, uses search_top_result to find a candidate page and tries to extract a direct download link.
+    (This function keeps previous semantics, simplified.)
+    """
+    # If looks like URL, download directly
+    if not query_or_url:
+        if gui_cb:
+            gui_cb(assistant_text="No URL or query provided", status="Idle")
+        return
+
     if query_or_url.startswith("http"):
         url = query_or_url
     else:
-        top, err = google_search_top_url(query_or_url)
-        if err or not top:
-            if DDG_AVAILABLE:
-                summ, fname = duckduckgo_search_summary(query_or_url)
-                if gui_cb:
-                    gui_cb(assistant_text=summ, status="Idle")
-                return
+        top = search_top_result(query_or_url)
+        if not top:
             if gui_cb:
-                gui_cb(assistant_text=f"Search failed: {err}", status="Idle")
+                gui_cb(assistant_text="No search result found (download failed).", status="Idle")
             return
-        url = top
+        url = top["href"]
+
     filename = os.path.basename(urlparse(url).path) or f"download_{int(time.time())}"
     dest = os.path.join(os.path.expanduser("~"), "Downloads", filename)
     if gui_confirm:
@@ -133,7 +200,9 @@ def download_via_search(query_or_url: str, gui_cb=None, gui_confirm=None):
     else:
         ok = True
     if not ok:
-        if gui_cb: gui_cb(assistant_text="Download cancelled", status="Idle")
+        if gui_cb:
+            gui_cb(assistant_text="Download cancelled", status="Idle")
         return
+
+    # Start download in background thread from calling code (GUI currently does that).
     download_file_with_progress(url, dest, gui_cb)
-    if gui_cb: gui_cb(assistant_text=f"Downloaded to {dest}", status="Idle")
