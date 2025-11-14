@@ -1,29 +1,25 @@
 # main.py
 """
-Entry point for modular Jarvis.
-This file instantiates the main window and (optionally) starts the wakeword listener.
-Adjusted to match your project layout.
+Entry point for the modular Jarvis app.
+Loads config.json, loads whisper models (asks to download if needed),
+starts WakewordListener (Porcupine if present, fallback to whisper),
+and creates the GUI (ui/window.JarvisGUI).
 """
 
 import os
 import json
 import threading
-import customtkinter as ctk
 
-from ui.orb import AnimatedOrb
-from ui.settings_window import SettingsWindow
-from core.wakeword import WakewordListener
+CONFIG_PATH = "config.json"
 
-CONFIG_PATH = "./config.json"
-
-
-def load_config():
-    if os.path.exists(CONFIG_PATH):
+def load_config(path=CONFIG_PATH):
+    if os.path.exists(path):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
+    # defaults
     return {
         "mic_device": None,
         "idle_model": "tiny",
@@ -31,118 +27,84 @@ def load_config():
         "screen_model": "base",
         "wakeword_enabled": True,
         "dark_mode": True,
+        "porcupine_access_key": None
     }
 
+def save_config(cfg, path=CONFIG_PATH):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
 
-def save_config(cfg):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=4)
 
+def main():
+    cfg = load_config()
 
-class JarvisApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
+    # lazy import heavy modules
+    from core.asr import ensure_model_with_prompt
+    from core.wakeword import WakewordListener
+    from ui.window import JarvisGUI
 
-        self.config_data = load_config()
-        ctk.set_appearance_mode("dark" if self.config_data.get("dark_mode", True) else "light")
-        ctk.set_default_color_theme("blue")
+    models = {}
+    try:
+        print("[main] Loading idle model:", cfg.get("idle_model"))
+        models["idle"] = ensure_model_with_prompt(cfg.get("idle_model", "tiny"))
+        print("[main] Loading active model:", cfg.get("active_model"))
+        models["active"] = ensure_model_with_prompt(cfg.get("active_model", "medium"))
+        print("[main] Loading screen model:", cfg.get("screen_model"))
+        models["screen"] = ensure_model_with_prompt(cfg.get("screen_model", "base"))
+    except Exception as exc:
+        print("[main] Model loading failed:", exc)
+        # Continue: GUI can still run but functions will complain if models missing.
 
-        self.title("Jarvis")
-        self.geometry("500x420")
-        self.resizable(False, False)
-
-        # orb holder frame
-        orb_holder = ctk.CTkFrame(self, width=160, height=160, corner_radius=80)
-        orb_holder.pack(pady=20)
-
-        # create AnimatedOrb — IMPORTANT: use positional args (parent, gif_path, size)
-        orb_gif = os.path.abspath(os.path.join("assets", "ui", "orb.gif"))
-        if os.path.exists(orb_gif):
-            # Correct call (positional): parent, gif_path, size
-            self.orb = AnimatedOrb(orb_holder, orb_gif, 150)
-        else:
-            # fallback to a simple CTkLabel inside orb_holder
-            lbl = ctk.CTkLabel(orb_holder, text="●", font=ctk.CTkFont(size=48, weight="bold"), text_color="#00d0ff")
-            lbl.pack(expand=True)
-
-        # controls
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(pady=10)
-
-        self.ptt_btn = ctk.CTkButton(btn_frame, text="🎤 Push to Talk", command=self._simulate_manual_trigger)
-        self.ptt_btn.grid(row=0, column=0, padx=10)
-
-        self.settings_btn = ctk.CTkButton(btn_frame, text="⚙ Settings", command=self.open_settings)
-        self.settings_btn.grid(row=0, column=1, padx=10)
-
-        self.status_label = ctk.CTkLabel(self, text="Idle")
-        self.status_label.pack(pady=20)
-
-        # wakeword
-        self.wake_listener = None
-        if self.config_data.get("wakeword_enabled", True):
-            self.start_wakeword_listener()
-
-    def start_wakeword_listener(self):
-        if self.wake_listener:
-            self.wake_listener.stop()
-        # pass in a callback — the WakewordListener implementation will call it on detection
-        self.wake_listener = WakewordListener(
-            on_wakeword=self.on_wakeword_detected,
-            wakeword="jarvis",
-            use_porcupine=True,
-            whisper_model=None,
-            device=self.config_data.get("mic_device")
-        )
-        self.wake_listener.start()
-        self.status_label.configure(text="Wakeword listening...")
-
-    def on_wakeword_detected(self):
-        # marshal back to GUI thread
-        self.after(0, self._wakeword_triggered)
-
-    def _wakeword_triggered(self):
-        self.status_label.configure(text="Wakeword detected!")
+    wake_engine = None
+    if cfg.get("wakeword_enabled", True):
         try:
-            self.orb.set_state("listening")
-        except Exception:
-            pass
+            # use porcupine if present, otherwise fallback will use whisper idle model
+            wake_engine = WakewordListener(
+                on_wakeword=lambda: print("[main] Wakeword detected (callback placeholder)"),
+                wakeword="jarvis",
+                porcupine_access_key=cfg.get("porcupine_access_key"),
+                use_porcupine=True,
+                whisper_model=models.get("idle"),
+                device=cfg.get("mic_device")
+            )
+            # start listener in background; GUI will receive its own listener if preferred.
+            wake_engine.start()
+        except Exception as exc:
+            print("[main] Wakeword engine failed to start:", exc)
+            wake_engine = None
 
-        # quick simulated flow to demonstrate orb states
-        self.after(1200, lambda: (self.orb.set_state("thinking"), self.status_label.configure(text="Thinking...")))
-        self.after(2500, lambda: (self.orb.set_state("speaking"), self.status_label.configure(text="Speaking...")))
-        self.after(3600, lambda: (self.orb.set_state("idle"), self.status_label.configure(text="Idle")))
-
-    def _simulate_manual_trigger(self):
-        self.status_label.configure(text="Manual activation!")
-        try:
-            self.orb.set_state("listening")
-        except Exception:
-            pass
-        self.after(1200, lambda: (self.orb.set_state("thinking"), self.status_label.configure(text="Thinking...")))
-        self.after(2400, lambda: (self.orb.set_state("speaking"), self.status_label.configure(text="Done.")))
-        self.after(3600, lambda: (self.orb.set_state("idle"), self.status_label.configure(text="Idle")))
-
-    def open_settings(self):
-        SettingsWindow(self, CONFIG_PATH, on_save=self.apply_config).show()
-
-    def apply_config(self, cfg):
-        save_config(cfg)
-        self.config_data = cfg
-        ctk.set_appearance_mode("dark" if cfg.get("dark_mode", True) else "light")
-        if cfg.get("wakeword_enabled"):
-            self.start_wakeword_listener()
-        else:
-            if self.wake_listener:
-                self.wake_listener.stop()
-                self.wake_listener = None
-            self.status_label.configure(text="Wakeword disabled.")
+    # Create GUI and hand over control
+    # The GUI itself will optionally start its own idle loops if LISTEN_MODE configured there.
+    app = JarvisGUI(models=models, wakeword_engine=wake_engine, config_path=CONFIG_PATH)
+    # If the wakeword engine is present, attach a GUI callback for when detected:
+    if wake_engine:
+        def gui_wake_cb():
             try:
-                self.orb.set_state("idle")
+                app.after(0, lambda: app._wakeword_simulation() if hasattr(app, "_wakeword_simulation") else app.gui_callback(assistant_text="Wakeword detected", status="Listening"))
             except Exception:
-                pass
+                try:
+                    app.gui_callback(assistant_text="Wakeword detected", status="Listening")
+                except Exception:
+                    pass
+        # Ensure WakewordListener calls GUI friendly callback: override on_wakeword if possible
+        try:
+            wake_engine.on_wakeword = lambda: app.after(0, app._wakeword_simulation if hasattr(app, "_wakeword_simulation") else lambda: app.gui_callback(assistant_text="Wakeword detected", status="Listening"))
+        except Exception:
+            pass
+
+    try:
+        app.mainloop()
+    finally:
+        # cleanup
+        try:
+            if wake_engine:
+                wake_engine.stop()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    app = JarvisApp()
-    app.mainloop()
+    main()

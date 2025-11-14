@@ -1,34 +1,22 @@
+# ui/orb.py
 """
-ui/orb.py — AnimatedOrb widget for Jarvis
-
-This file is a merged, fixed and future-proof version of the AnimatedOrb you were working on.
-Key fixes & features:
- - Accepts either `parent` or `parent_widget` for backward compatibility.
- - Robust handling of customtkinter `fg_color` values like ("gray81","gray20") or "gray81 gray20".
- - Uses TYPE_CHECKING to provide a safe type hint for Pillow's PhotoImage so static checkers (Pylance) don't complain.
- - Loads an animated GIF (Pillow) when available; otherwise falls back to a pulsing dot (CTkLabel if available, tk.Label otherwise).
- - Clean state API: set_state('idle'|'listening'|'thinking'|'speaking'|'error').
- - set_on_click(callback) to attach a click handler.
- - set_gif / set_bg_color helpers.
- - Safe to drop into your ui/ folder and use without changing existing calls.
+AnimatedOrb: GIF-based animated orb with a pulsing fallback.
+- Robust handling for customtkinter color formats.
+- set_state('idle'|'listening'|'thinking'|'speaking'|'error')
+- set_on_click(callback)
+- set_gif(path) to change GIF at runtime
+- destroy()
 """
 
-from typing import List, Optional, Callable, TYPE_CHECKING
 import os
 import time
 
-# GUI libs
 try:
     import customtkinter as ctk
 except Exception:
     ctk = None
 
 import tkinter as tk
-
-# Pillow imports only at runtime; TYPE_CHECKING tells static checkers about PhotoImage type
-if TYPE_CHECKING:
-    # type-checkers will see this; it is not executed at runtime
-    from PIL.ImageTk import PhotoImage
 
 try:
     from PIL import Image, ImageTk
@@ -43,9 +31,7 @@ except Exception:
     RESAMPLE_LANCZOS = None
     PIL_AVAILABLE = False
 
-# ---------------------------------------------------------------------
-# Colors / speeds per state
-# ---------------------------------------------------------------------
+# colors and speeds
 _STATE_COLORS = {
     "idle": "#0b3d91",
     "listening": "#00d0ff",
@@ -53,7 +39,6 @@ _STATE_COLORS = {
     "speaking": "#ffffff",
     "error": "#ff4d4f",
 }
-
 _STATE_LABEL_COLORS = {
     "idle": "#bfe7ff",
     "listening": "#00f0ff",
@@ -61,7 +46,6 @@ _STATE_LABEL_COLORS = {
     "speaking": "#ffffff",
     "error": "#ffb3b3",
 }
-
 _STATE_SPEED = {
     "idle": 0.6,
     "listening": 1.6,
@@ -69,13 +53,9 @@ _STATE_SPEED = {
     "speaking": 2.0,
     "error": 3.0,
 }
-
 _DEFAULT_FRAME_DURATION_MS = 100
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
 def _blend_hex_color(hex_from: str, hex_to: str, t: float) -> str:
     t = max(0.0, min(1.0, t))
     def h2i(h):
@@ -86,15 +66,8 @@ def _blend_hex_color(hex_from: str, hex_to: str, t: float) -> str:
     return "#{:02x}{:02x}{:02x}".format(*out)
 
 
-def _normalize_color_from_ctk(raw) -> str:
-    """
-    Normalize CTkFrame.cget('fg_color') variants to a single color string.
-    Accepts:
-      - tuple/list (light, dark) -> returns last element
-      - "gray81 gray20" -> returns last token "gray20"
-      - single string -> return as-is
-    Fallback -> "#000000"
-    """
+def _normalize_color_from_ctk(raw):
+    """Choose a single color from customtkinter 'fg_color' which may be tuple or 'gray81 gray20' string."""
     if isinstance(raw, (list, tuple)):
         try:
             return str(raw[-1])
@@ -107,62 +80,39 @@ def _normalize_color_from_ctk(raw) -> str:
     return "#000000"
 
 
-# ---------------------------------------------------------------------
-# AnimatedOrb
-# ---------------------------------------------------------------------
 class AnimatedOrb:
-    def __init__(self,
-                 parent=None,
-                 parent_widget=None,
-                 gif_path: Optional[str] = None,
-                 size: int = 120,
-                 bg_color: Optional[str] = None,
-                 pack: bool = True):
-        """
-        parent / parent_widget: parent container (CTkFrame or tk.Frame)
-        gif_path: path to orb.gif (optional)
-        size: pixel size (width & height)
-        bg_color: explicit background color override (single color string)
-        pack: if True, the orb's internal container will be packed automatically
-        """
-        # support old callers that used parent_widget keyword
-        if parent is None and parent_widget is not None:
-            parent = parent_widget
+    def __init__(self, parent=None, gif_path: str = None, size: int = 120, bg_color: str = None, pack: bool = True):
         self._parent = parent
         self.gif_path = gif_path
         self.size = int(size or 120)
-        self._bg_color_override = bg_color
+        self._bg_override = bg_color
         self._pack = bool(pack)
 
-        # state
         self._state = "idle"
         self._speed_multiplier = 1.0
 
-        # frames (PhotoImage objects). Use TYPE_CHECKING alias name -> avoids runtime issues.
-        # At runtime this is just a list; static checkers know it's List[PhotoImage].
-        self._frames: List["PhotoImage"] = []
-        self._durations: List[int] = []
+        # frames/durations
+        self._frames = []     # plain list to avoid typing issues
+        self._durations = []
         self._frame_index = 0
         self._anim_id = None
         self._anim_running = False
 
-        # fallback pulse loop
+        # pulse fallback
         self._pulse_job = None
         self._pulse_val = 0.0
         self._pulse_dir = 1
 
-        # click callback
-        self._on_click: Optional[Callable[[], None]] = None
+        self._on_click = None
 
-        # container: prefer CTkFrame to stay visually consistent, else tk.Frame
-        self._use_ctk = (ctk is not None and isinstance(self._parent, (ctk.CTkFrame, ctk.CTk)))
+        # choose container type
+        self._use_ctk = ctk is not None and isinstance(parent, (ctk.CTkFrame, ctk.CTk))
         try:
             if self._use_ctk:
                 self._container = ctk.CTkFrame(self._parent, width=self.size, height=self.size, corner_radius=self.size // 2)
             else:
                 self._container = tk.Frame(self._parent, width=self.size, height=self.size, bd=0, highlightthickness=0)
         except Exception:
-            # ultimate fallback
             self._container = tk.Frame(self._parent, width=self.size, height=self.size, bd=0, highlightthickness=0)
 
         if self._pack:
@@ -170,13 +120,11 @@ class AnimatedOrb:
                 self._container.pack_propagate(False)
                 self._container.pack(expand=True, fill="both")
             except Exception:
-                # caller will manage geometry
                 pass
 
-        # determine safe bg color for tk.Labels (CTk returns complex values)
-        if self._bg_color_override:
-            safe_bg = self._bg_color_override
-        else:
+        # determine safe bg color
+        safe_bg = self._bg_override
+        if not safe_bg:
             try:
                 raw = self._container.cget("fg_color")
                 safe_bg = _normalize_color_from_ctk(raw)
@@ -184,20 +132,18 @@ class AnimatedOrb:
                 safe_bg = "#000000"
         self._safe_bg_color = safe_bg
 
-        # try load gif (Pillow required)
+        # try to load gif
         loaded_gif = False
         if self.gif_path and PIL_AVAILABLE and os.path.exists(self.gif_path):
             try:
                 self._load_gif(self.gif_path)
                 loaded_gif = bool(self._frames)
             except Exception as exc:
-                # safe fallback to pulsing dot
-                print(f"[AnimatedOrb] GIF load failed: {exc}")
+                print("[AnimatedOrb] GIF load failed:", exc)
                 loaded_gif = False
 
-        # create visual widget
+        # create visual label
         if loaded_gif:
-            # need a tk.Label to show PhotoImage reliably
             try:
                 self._label = tk.Label(self._container, bd=0, bg=self._safe_bg_color)
             except Exception:
@@ -209,7 +155,7 @@ class AnimatedOrb:
             self._anim_running = True
             self._schedule_next_frame()
         else:
-            # fallback: prefer CTkLabel (text_color control) else tk.Label
+            # fallback CTkLabel if available to control text_color
             if ctk is not None:
                 try:
                     self._label = ctk.CTkLabel(self._container, text="●",
@@ -230,20 +176,18 @@ class AnimatedOrb:
             self._anim_running = True
             self._start_pulse_loop()
 
-        # bind click event
+        # bind click
         try:
             self._label.bind("<ButtonRelease-1>", self._handle_click)
         except Exception:
-            # if binding fails, ignore silently
             pass
 
-        # start visuals
         self.set_state("idle")
 
-    # ---------- GIF helpers ----------
-    def _load_gif(self, path: str) -> None:
+    # ----- GIF handling -----
+    def _load_gif(self, path: str):
         if not PIL_AVAILABLE:
-            raise RuntimeError("Pillow required to load GIF.")
+            raise RuntimeError("Pillow not available to load GIF.")
         im = Image.open(path)
         frames = []
         durations = []
@@ -286,7 +230,7 @@ class AnimatedOrb:
         except Exception:
             self._anim_id = None
 
-    # ---------- pulse fallback ----------
+    # ----- pulse fallback -----
     def _start_pulse_loop(self):
         if not self._anim_running:
             return
@@ -309,16 +253,16 @@ class AnimatedOrb:
                 if ctk is not None and isinstance(self._label, ctk.CTkLabel):
                     self._label.configure(text_color=color)
                 else:
-                    # many tk variants accept "fg" or "foreground"
+                    # try several attributes for tk variants
+                    self._label.configure(fg=color)
+            except Exception:
+                try:
+                    self._label.configure(foreground=color)
+                except Exception:
                     try:
                         self._label.configure(fg=color)
                     except Exception:
-                        try:
-                            self._label.configure(foreground=color)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        pass
 
             try:
                 interval = int(max(20, 50 / max(0.1, self._speed_multiplier)))
@@ -336,8 +280,8 @@ class AnimatedOrb:
                 pass
             self._pulse_job = None
 
-    # ---------- click ----------
-    def set_on_click(self, cb: Optional[Callable[[], None]]):
+    # ----- clicks -----
+    def set_on_click(self, cb):
         self._on_click = cb
 
     def _handle_click(self, event=None):
@@ -347,22 +291,19 @@ class AnimatedOrb:
             except Exception:
                 pass
 
-    # ---------- public API ----------
-    def set_state(self, state: str) -> None:
+    # ----- public API -----
+    def set_state(self, state: str):
         if not state:
             state = "idle"
         state = state.lower()
         if state == self._state:
-            # still update multiplier if needed
             self._speed_multiplier = _STATE_SPEED.get(state, 1.0)
             return
-
         self._state = state
         self._speed_multiplier = _STATE_SPEED.get(state, 1.0)
         bg = _STATE_COLORS.get(state, "#0b3d91")
-        label_text_color = _STATE_LABEL_COLORS.get(state, "#bfe7ff")
+        label_color = _STATE_LABEL_COLORS.get(state, "#bfe7ff")
 
-        # apply container bg
         try:
             if self._use_ctk and isinstance(self._container, ctk.CTkFrame):
                 try:
@@ -377,22 +318,20 @@ class AnimatedOrb:
         except Exception:
             pass
 
-        # label color for fallback
         try:
             if ctk is not None and isinstance(self._label, ctk.CTkLabel):
-                self._label.configure(text_color=label_text_color)
+                self._label.configure(text_color=label_color)
             else:
                 try:
-                    self._label.configure(fg=label_text_color)
+                    self._label.configure(fg=label_color)
                 except Exception:
                     try:
-                        self._label.configure(foreground=label_text_color)
+                        self._label.configure(foreground=label_color)
                     except Exception:
                         pass
         except Exception:
             pass
 
-        # tune animation/pulse
         if self._frames:
             if self._anim_id:
                 try:
@@ -406,7 +345,7 @@ class AnimatedOrb:
             self._stop_pulse_loop()
             self._start_pulse_loop()
 
-    def set_bg_color(self, hex_color: str) -> None:
+    def set_bg_color(self, hex_color: str):
         try:
             if self._use_ctk and isinstance(self._container, ctk.CTkFrame):
                 self._container.configure(fg_color=hex_color)
@@ -415,11 +354,10 @@ class AnimatedOrb:
         except Exception:
             pass
 
-    def set_gif(self, gif_path: str) -> None:
+    def set_gif(self, gif_path: str):
         if not gif_path or not PIL_AVAILABLE or not os.path.exists(gif_path):
             return
         try:
-            # stop current animation/pulse
             self._anim_running = False
             if self._anim_id:
                 try:
@@ -428,22 +366,16 @@ class AnimatedOrb:
                     pass
                 self._anim_id = None
             self._stop_pulse_loop()
-
-            # load glyph frames
             self._load_gif(gif_path)
-            # replace label with tk.Label for PhotoImage (if necessary)
             try:
                 try:
                     self._label.destroy()
                 except Exception:
                     pass
-                self._label = tk.Label(self._container, bd=0,
-                                       bg=_normalize_color_from_ctk(self._container.cget("fg_color")) if hasattr(self._container, "cget") else "#000000")
+                self._label = tk.Label(self._container, bd=0, bg=_normalize_color_from_ctk(self._container.cget("fg_color")) if hasattr(self._container, "cget") else "#000000")
                 self._label.pack(expand=True, fill="both")
             except Exception:
-                # leave existing label if replacement fails
                 pass
-
             self._anim_running = True
             self._frame_index = 0
             self._schedule_next_frame()
@@ -452,11 +384,10 @@ class AnimatedOrb:
             except Exception:
                 pass
         except Exception:
-            # on error revert to fallback
             self._frames = []
             self._durations = []
 
-    def destroy(self) -> None:
+    def destroy(self):
         self._anim_running = False
         if self._anim_id:
             try:
