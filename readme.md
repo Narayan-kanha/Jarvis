@@ -1,186 +1,239 @@
-# 🧠 Jarvis – Local Desktop AI Assistant  
-A fully offline-capable, GPU-accelerated, voice-controlled desktop assistant built with Python, Whisper, customTkinter, and various automation utilities.
+---
 
-Jarvis can:
-- Listen continuously (“Hey Jarvis”) or with push-to-talk
-- Execute voice commands
-- Search Google → DuckDuckGo fallback  
-- Download software from the internet  
-- Explain what's on your screen (OCR)
-- Perform shutdown / restart operations
-- Give weather, news, wiki summaries  
-- Monitor GPU temperature & usage and auto-protect system  
-- Animate a custom `orb.gif` visual interface  
-- Minimize into a floating animated orb overlay  
+# 🧠 Jarvis — Modular Local Desktop AI Assistant
+
+A clean, fully-modular, GPU-accelerated, voice-controlled offline assistant powered by **Whisper**, **customTkinter**, **Porcupine wakeword**, **OCR**, and robust system tools.
+
+Jarvis now uses a **structured multi-file architecture**, an **animated orb UI**, and a **clean separation** between ASR, GUI, command handling, and utilities.
 
 ---
 
-## ✨ Features
+# ✨ What’s New (Modular Edition)
 
-### 🎙️ Voice Control  
-- Whisper-powered speech recognition  
-- Three Whisper models:
-  - **tiny** for idle listening  
-  - **medium** for active queries  
-  - **base** for screen explain  
-- Wakeword detection: “**Hey Jarvis**”
-- Push-to-talk button  
-- Adjustable VAD sensitivity  
-
-### 🧠 AI Capabilities  
-- Google search → fallback to DuckDuckGo  
-- Auto-summary of top result  
-- Wikipedia summaries  
-- YouTube play command  
-- General Q&A  
-- System stats  
-
-### 📥 Intelligent Download Assistant  
-You can say things like:
-
-> “Jarvis, download Python 3.11.4”
-
-Jarvis will:
-1. Search Google  
-2. Extract direct download links  
-3. Confirm with you  
-4. Download with progress bar  
-
-### 🖼️ Screen Explanation  
-- Captures and reads your screen with OCR  
-- Continues explaining until you press **SPACE**  
-- Saves screenshots to `./screen_explain/`  
-
-### 🔥 GPU Safety Monitor  
-- Uses NVIDIA NVML (if available)  
-- Warns when:
-  - Temp ≥ 75°C  
-  - Util ≥ 70%  
-- Auto-shuts the assistant if:
-  - Temp ≥ 80°C  
-  - Util ≥ 85%  
-  (After voice confirmation)
-
-### 🎧 TTS & SFX  
-- TTS via pyttsx3 (offline)
-- Optional ElevenLabs voice  
-- Sound effects:
-  - wake  
-  - listen  
-  - error  
-  - done  
-
-### 🟠 Custom GUI  
-Built with **customTkinter**:
-- Animated `orb.gif`  
-- Dark mode  
-- Status, logs, progress bar  
-- Buttons: push-to-talk, explain screen, minimize, settings  
-- Minimize → floating orb overlay  
+✔ Fully split into **modules**
+✔ Beautiful **Animated Orb (`orb.gif`)**
+✔ Proper **floating orb overlay**
+✔ **ASR isolated** in `core/asr.py`
+✔ **Wakeword** (optional Porcupine) in `core/wakeword.py`
+✔ **Audio recorder** in `core/recorder.py`
+✔ **Search, OCR, system, GPU monitor** in `utils/`
+✔ GUI rewritten cleanly in `ui/window.py`
+✔ All logic cleanly organized — no more 2,500-line monster files
 
 ---
 
-## 📁 Project Structure
+# 📁 Project Structure (New Modular Layout)
 
 ```
-
 Jarvis/
 │
-├── jarvis_gui.py               # Main application
-├── model/                      # Whisper .pt models (auto-downloaded)
-│    ├── tiny.pt
-│    ├── medium.pt
-│    └── base.pt
+├── main.py                     # Entry point - loads models, starts GUI
+│
+├── core/                       # ASR + wakeword + recording
+│   ├── __init__.py
+│   ├── asr.py                  # Whisper loading + transcription
+│   ├── recorder.py             # Audio recording helpers
+│   └── wakeword.py             # Porcupine wakeword engine (optional)
+│
+├── ui/                         # User Interface
+│   ├── __init__.py
+│   ├── orb.py                  # Animated GIF orb class
+│   └── window.py               # Main GUI using customTkinter
+│
+├── utils/                      # Tools & helpers
+│   ├── __init__.py
+│   ├── search.py               # Google + DuckDuckGo + downloader
+│   ├── screen.py               # Screen capture + OCR
+│   └── system.py               # GPU monitor + system stats + internet check
+│
+├── model/                      # Whisper models auto-saved here
+│   ├── tiny.pt
+│   ├── medium.pt
+│   └── base.pt
 │
 ├── assets/
-│    ├── sfx/
-│    │    ├── wake.wav
-│    │    ├── listen.wav
-│    │    ├── error.wav
-│    │    └── done.wav
-│    └── ui/
-│         ├── orb.gif
-│         └── icon.png
+│   ├── sfx/                    # UI sound effects
+│   │   ├── wake.wav
+│   │   ├── listen.wav
+│   │   ├── error.wav
+│   │   └── done.wav
+│   └── ui/
+│       ├── orb.gif            # Animated orb
+│       └── icon.png           # Window icon
 │
-├── search_summaries/           # Auto-saved search results
-└── screen_explain/             # Saved OCR screenshots
-
-````
+├── search_summaries/           # Auto-saved search summaries
+└── screen_explain/             # OCR screenshot dumps
+```
 
 ---
 
-## 🔧 Installation
+# 🚀 Features
 
-### 1. Install Python packages
+## 🎙️ Voice Assistant
+
+* Whisper-powered speech recognition:
+
+  * `tiny` → idle / always listening
+  * `medium` → active conversation
+  * `base` → OCR speech
+* Optional **Porcupine wakeword** (“Jarvis”)
+* Push-to-talk button
+* Adjustable VAD & silence detection
+
+---
+
+## 🔎 Smart Search + Downloads
+
+### “Search for how hot the sun is”
+
+✔ Google search → fallback DuckDuckGo summary
+✔ Auto-saves text summary
+
+### “Download Python 3.12”
+
+✔ Scrapes top Google result
+✔ Extracts direct download links
+✔ Confirms via GUI
+✔ Downloads with progress bar
+
+---
+
+## 🖥️ Screen Explanation (OCR)
+
+* Capture screen every second
+* Extract text with Tesseract
+* Read aloud
+* Stop anytime by pressing **SPACE**
+* Saves all frames to `screen_explain/`
+
+---
+
+## 🔊 Voice & Sound Feedback
+
+* TTS (pyttsx3 — fully offline)
+* Sound effects:
+
+  * wake
+  * listen
+  * error
+  * done
+
+You can customize voices, ElevenLabs optional.
+
+---
+
+## 🔥 GPU Safety Monitor
+
+* Real-time reading (via NVML)
+* Warns when:
+
+  * Temp ≥ 75°C
+  * Util ≥ 70%
+* Asks user before auto-shutting:
+
+  * Temp ≥ 80°C
+  * Util ≥ 85%
+
+---
+
+## 🧩 New GUI System
+
+* Built with **customTkinter**
+* Uses modular `ui/window.py`
+* Displays:
+
+  * Status
+  * Transcript
+  * Assistant output
+  * Progress bar
+* **Animated orb from orb.gif**
+* Minimize → **floating orb overlay**
+
+  * Always on top
+  * Clicking → opens GUI & starts listening
+
+---
+
+# 🔧 Installation
+
+## 1. Install Dependencies
+
+### Core:
 
 ```sh
 pip install torch sounddevice soundfile pygame pyttsx3 numpy pillow
-pip install customtkinter mss pytesseract psutil geopy geocoder
-pip install beautifulsoup4 duckduckgo-search requests
-pip install pynput wikipedia
-````
+pip install customtkinter beautifulsoup4 requests
+pip install mss pytesseract psutil pynput
+pip install geopy geocoder wikipedia duckduckgo-search
+```
 
-### 2. Install Whisper
+### Whisper
 
 ```sh
 pip install openai-whisper
 ```
 
-### 3. Optional but recommended
+### Optional
 
-#### NVIDIA GPU monitoring:
+GPU monitor:
 
 ```sh
 pip install nvidia-ml-py
 ```
 
-#### OCR (Windows only)
+Porcupine wakeword:
 
-Install **Tesseract OCR**:
+```sh
+pip install pvporcupine
+```
+
+For OCR on Windows:
+Install Tesseract:
 [https://github.com/UB-Mannheim/tesseract/wiki](https://github.com/UB-Mannheim/tesseract/wiki)
 
 ---
 
-## ▶️ Running Jarvis
+# ▶️ Running Jarvis
+
+### Launch:
 
 ```
-python jarvis_gui.py
+python main.py
 ```
 
-On first launch:
+On first run:
 
-* Whisper models will download automatically
-* You may be asked to confirm
-* Then the GUI will appear
+* Models will download automatically
+* GUI opens with animated orb
+* Idle listener starts (if enabled)
 
 ---
 
-## 🎤 Usage Examples
+# 🎤 Voice Examples
 
-### Wake it up
+### Wake Up
 
 > “Hey Jarvis”
-> *(wait for beep)*
 
-### Ask something
+### Commands
 
-> “Search who invented JavaScript”
-> “What is the weather in London?”
-> “Explain my screen”
-> “Download Python 3.11.4”
+> “Search who built the Burj Khalifa”
 > “Open YouTube”
-> “Play chill music on YouTube”
-> “Shutdown my PC”
+> “Play lo-fi music on YouTube”
+> “Download VSCode”
+> “What’s my system usage?”
+> “Explain my screen”
+> “Shutdown the PC”
 
-### While minimized
+### Minimized Mode
 
-Click the floating orb → it reopens and listens instantly.
+* Click floating orb → GUI reopens → Jarvis listens instantly
 
 ---
 
-## ⚙️ Configuration
+# ⚙️ Configuration
 
-All config values are at the top of `jarvis_gui.py`:
+Inside `main.py` or module configs:
 
 ```py
 WHISPER_IDLE_MODEL = "tiny"
@@ -189,62 +242,54 @@ WHISPER_SCREEN_MODEL = "base"
 
 GPU_TEMP_WARN_C = 75
 GPU_TEMP_SHUT_C = 80
-LISTEN_MODE = "both"
+
+LISTEN_MODE = "both"   # 'always', 'push', 'both'
+PICOVOICE_ACCESS_KEY = None
 ```
 
-You can freely adjust:
+You can adjust:
 
-* Wakeword sensitivity
-* VAD sensitivity
-* GPU thresholds
-* TTS voice
 * Models
-* Behavior
+* Wakeword engine
+* Sensitivity
+* Voice
+* Interface
 
 ---
 
-## 💡 Troubleshooting
+# 💡 Troubleshooting
 
-### 🔇 Jarvis hears random noise
+### Random Wakeword Triggers
 
-Increase silence threshold:
+Lower noise sensitivity in `core/recorder.py`:
 
 ```py
-RMS_SILENCE_THRESHOLD = 0.015
+rms_threshold = 0.015
 ```
 
-### ⬆️ GPU goes high
+### GPU Spikes
 
-This is normal:
+Whisper medium uses GPU heavily — this is normal.
 
-* Whisper medium uses the GPU heavily during transcription
-* Jarvis will warn you if it's too hot
+### Google Blocked
 
-### ⚠️ Google blocking searches
-
-You’ll see:
-
-```
-google-block
-```
-
-Jarvis will auto-fallback to DuckDuckGo.
+Jarvis switches to DuckDuckGo automatically.
 
 ---
 
-## 📜 License
+# 📜 License
 
 MIT License — free for personal & commercial use.
 
 ---
 
-## ❤️ Credits
+# ❤️ Credits
 
 * Whisper (OpenAI)
 * customTkinter
+* Porcupine (Picovoice)
 * pytesseract
-* pygame
 * NVML
+* pygame
 * You
 
----
