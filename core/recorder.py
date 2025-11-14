@@ -14,6 +14,8 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 
 
+
+
 def record_seconds_to_wav(seconds: float, filename: str, amplify: float = 1.0) -> str:
     frames = sd.rec(int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16")
     sd.wait()

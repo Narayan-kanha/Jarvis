@@ -1,8 +1,57 @@
-model/
-code_extract.py
-tree.py
-.gitignore
+# Python
 __pycache__/
-core/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Models
+model/
+*.pt
+*.onnx
+
+# Logs
+*.log
+
+# System junk
+.DS_Store
+Thumbs.db
+
+# Virtual env
+.env/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+*.tmp
+*.temp
+*.pyc
+
+# Cache
+cache/
+temp/
+*.wav
+
+# Credentials / Secrets
+credentials.json
+*.ppn
+*.pv
+*.pem
+*.key
+*.secret
+*.token
+
+# Auto-saved search or screenshots
+search_summaries/
+screen_explain/
+
+# Compiled assets
 ui/__pycache__/
+core/__pycache__/
 utils/__pycache__/
+
+
+.gitignore

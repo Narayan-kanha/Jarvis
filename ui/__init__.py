@@ -1,11 +1,11 @@
 # ui/__init__.py
-
 from .orb import AnimatedOrb
-from .window import JarvisWindow
 from .settings_window import SettingsWindow
 
-__all__ = [
-    "AnimatedOrb",
-    "JarvisWindow",
-    "SettingsWindow",
-]
+# JarvisGUI is in ui.window (import lazily in main) but export if you want
+try:
+    from .window import JarvisGUI
+except Exception:
+    JarvisGUI = None
+
+__all__ = ["AnimatedOrb", "SettingsWindow", "JarvisGUI"]
